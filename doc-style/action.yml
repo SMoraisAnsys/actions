@@ -51,11 +51,23 @@ inputs:
   vale-version:
     description: >
       Version number for Vale.
-    # TODO: use the latest stable version from Vale, see issue
-    # https://github.com/ansys/actions/issues/350
-    default: '2.29.6'
+    default: '3.4.1'
     required: false
     type: string
+
+  toml-version:
+    description: >
+      Toml version used for retrieving the towncrier directory.
+    default: '0.10.2'
+    required: false
+    type: string
+
+  ignore-changelogd:
+    description: >
+      Whether or not to ignore markdown files in doc/changelog.d/.
+    default: true
+    required: false
+    type: bool
 
   checkout:
       description: >
@@ -73,35 +85,83 @@ runs:
       uses: actions/checkout@v4
       if: inputs.checkout == 'true'
 
-    # TODO: remove this deprecation in ansys/actions@v6
-
-    - name: "Build deprecation warning"
-      if: startswith(inputs.vale-version, '2.')
-      shell: bash
-      run: |
-        deprecation_text="
-        Ansys Actions v6 will include by default Vale version v3. For
-        migrating, please update your 'doc/.vale.ini' file and 'doc/styles'
-        directory as in this pull-request https://github.com/ansys/pymechanical/pull/613
-        "
-        echo "DEPRECATION_TEXT=$(echo $deprecation_text)" >> $GITHUB_ENV
-
     - uses: ansys/actions/_logging@main
-      if: startswith(inputs.vale-version, '2.')
       with:
-        level: "WARNING"
+        level: "INFO"
         message: >
-          Ansys Actions v6 will include by default Vale version v3. For
-          migrating, please update your "doc/.vale.ini" file and "doc/styles"
-          directory as in this pull-request https://github.com/ansys/pymechanical/pull/613
+          Ensure Vale configuration follows the right layout for the specified
+          version of Vale.
 
-    - name: "Raise deprecation warning outside of the CI/CD logs"
+    - name: "Check Vale's version"
       shell: bash
-      if: startswith(inputs.vale-version, '2.')
       run: |
-        echo "::warning ::${DEPRECATION_TEXT}"
+        version=${{ inputs.vale-version }}
+        vale_major_version=$( echo $version | cut -d '.' -f 1)
+        echo "VALE_MAJOR_VERSION=$(echo $vale_major_version)" >> $GITHUB_ENV
+        echo "VALE_MAJOR_VERSION set to $vale_major_version"  # Add this line for debugging
 
-    # TODO: end
+    - name: "Verify Vale's configuration layout according to selected version"
+      shell: bash
+      run: |
+        if [ -z "$VALE_MAJOR_VERSION" ]; then
+          echo "VALE_MAJOR_VERSION is not set."
+          exit 1
+        fi
+
+        if [ $VALE_MAJOR_VERSION -ge 3 ]; then
+          if [ ! -d ./doc/styles/config/vocabularies ]; then
+            echo "Projects using Vale >=v3 require a doc/styles/config/vocabularies directory."
+            echo "See migration guide https://actions.docs.ansys.com/version/stable/migrations/docs-style-vale-version-update.html"
+            exit 1
+          fi
+        else
+          if [ ! -d ./doc/styles/Vocab ]; then
+            echo "Projects using Vale <=v2 require a doc/styles/Vocab directory. Consider updating your Vale version to v3."
+            echo "See migration guide https://actions.docs.ansys.com/version/stable/migrations/docs-style-vale-version-update.html"
+            exit 1
+          fi
+        fi
+
+    - name: "Install toml"
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip toml==${{ inputs.toml-version }}
+
+    - name: "Get towncrier directory"
+      shell: python
+      run: |
+        import os
+        import toml
+
+        if os.path.exists("pyproject.toml"):
+            # Load pyproject.toml
+            with open('pyproject.toml', 'r') as f:
+                config = toml.load(f)
+                try:
+                    # Get towncrier directory
+                    directory=config["tool"]["towncrier"]["directory"]
+                except KeyError:
+                    # If towncrier directory isn't specified in pyproject.toml
+                    directory=""
+        else:
+            directory=""
+
+        # Get the GITHUB_ENV variable
+        github_env = os.getenv('GITHUB_ENV')
+
+        # Append the TOWNCRIER_DIR with its value to GITHUB_ENV
+        with open(github_env, "a") as f:
+            f.write(f"TOWNCRIER_DIR={directory}")
+
+    - name: "Check if changelog.d is ignored"
+      shell: bash
+      run: |
+        # If changelog.d is ignored and the TOWNCRIER_DIR exists in pyproject.toml, add the ignore glob
+        if [[ ${{ inputs.ignore-changelogd }} == 'true' ]] && [[ -n "${{ env.TOWNCRIER_DIR }}" ]]; then
+          echo VALE_FLAGS="--config=${{ inputs.vale-config }} --glob=!${{ env.TOWNCRIER_DIR }}/*.md" >> $GITHUB_ENV
+        else
+          echo VALE_FLAGS="--config=${{ inputs.vale-config }}" >> $GITHUB_ENV
+        fi
 
     - name: "Run Vale"
       uses: errata-ai/vale-action@reviewdog
@@ -113,5 +173,5 @@ runs:
         level: error
         filter_mode: nofilter
         fail_on_error: true
-        vale_flags: "--config=${{ inputs.vale-config }}"
+        vale_flags: "${{ ENV.VALE_FLAGS }}"
         version: ${{ inputs.vale-version }}

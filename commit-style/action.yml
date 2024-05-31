@@ -25,7 +25,8 @@ name: >
 
 description: >
   Action that checks if the title of the pull request is following the
-  conventional commits standard.
+  `conventional commits standard
+  <https://github.com/commitizen/conventional-commit-types/blob/master/index.json>`_.
 
 inputs:
 
@@ -42,13 +43,12 @@ inputs:
 
   use-upper-case:
     description: >
-      Use of uppercase letters in the "type" and "scope" fields of the commit.
-      For example, "FIX(SERVER)!: fix server crash issue" would be a valid commit.
+      Use of uppercase letters in the "type" field of the commit.
+      For example, "FIX!: fix server crash issue" would be a valid commit.
 
       .. note::
 
-          Expected type are upper cases of `conventional commit types
-          <https://github.com/commitizen/conventional-commit-types/blob/master/index.json>`_.
+          Expected type are upper cases of conventional commit types.
 
     required: false
     default: false
